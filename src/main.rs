@@ -93,6 +93,8 @@ impl Chip8CPU {
         let mut instruction: u16 = 0x0;
         instruction = (self.ram[self.pc as usize] as u16) << 8;
         instruction = instruction | (self.ram[(self.pc + 1) as usize] as u16);
+
+        println!("INSTRUCTION: {:#X}", instruction);
             
         // Move to next instruction
         self.pc += 2;
@@ -168,105 +170,110 @@ impl Chip8CPU {
                 // Set register = register + value
                 self.registers[register] = self.registers[register].wrapping_add(value);
             },
-            0x8000..=0x8FF0 => {    // LD Vx, Vy
+            0x8000..=0x8FFF => {
+                let byte = (instruction & 0xF) as u8;
                 let register_x = ((instruction & 0x0F00) >> 8) as usize;
                 let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                println!("LD V{:X}, V{:X}", register_x, register_y);
-                self.registers[register_x] = self.registers[register_y];
-            },
-            0x8001..=0x8FF1 => {    // OR Vx, Vy
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                println!("OR V{:X}, V{:X}", register_x ,register_y);
-                self.registers[register_x] = self.registers[register_x] | self.registers[register_y];
-            },
-            0x8002..=0x8FF2 => {    // AND Vx, Vy
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                println!("AND V{:X}, V{:X}", register_x, register_y);
-                self.registers[register_x] = self.registers[register_x] & self.registers[register_y];
-            },
-            0x8003..=0x8FF3 => {    // XOR Vx, Vy
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                println!("XOR V{:X}, V{:X}", register_x, register_y);
-                self.registers[register_x] = self.registers[register_x] ^ self.registers[register_y];
-            },
-            0x8004..=0x8FF4 => {    // ADD Vx, Vy
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                println!("ADD V{:X}, V{:X}", register_x, register_y);
 
-                let (val, overflow) = self.registers[register_x].overflowing_add(self.registers[register_y]);
-                self.registers[register_x] = val;
-                if overflow {
-                    self.registers[0xF] = 1;
-                } else {
-                    self.registers[0xF] = 0;
+                match byte {
+                    0x0 => {
+                        println!("LD V{:X}, V{:X}", register_x, register_y);
+                        self.registers[register_x] = self.registers[register_y];
+                    },
+                    0x1 => {
+                        println!("OR V{:X}, V{:X}", register_x ,register_y);
+                        self.registers[register_x] = self.registers[register_x] | self.registers[register_y];
+                    },
+                    0x2 => {
+                        println!("AND V{:X}, V{:X}", register_x, register_y);
+                        self.registers[register_x] = self.registers[register_x] & self.registers[register_y];
+                    },
+                    0x3 => {
+                        println!("XOR V{:X}, V{:X}", register_x, register_y);
+                        self.registers[register_x] = self.registers[register_x] ^ self.registers[register_y];
+                    },
+                    0x4 => {
+                        println!("ADD V{:X}, V{:X}", register_x, register_y);
+                        let (val, overflow) = self.registers[register_x].overflowing_add(self.registers[register_y]);
+                        self.registers[register_x] = val;
+                        if overflow {
+                            self.registers[0xF] = 1;
+                        } else {
+                            self.registers[0xF] = 0;
+                        }
+                    },
+                    0x5 => {
+                        let x = self.registers[register_x];
+                        let y = self.registers[register_y];
+                        println!("SUB V{:X}, V{:X}", register_x, register_y);
+
+                        if x > y {
+                            self.registers[0xF] = 1;
+                        } else {
+                            self.registers[0xF] = 0;
+                        }
+
+                        self.registers[register_x] = x - y;
+                    },
+                    0x6 => {
+                        println!("SHR V{:X}", register_x);
+
+                        if (self.registers[register_x] & 0x1) == 1 {
+                            self.registers[0xF] = 1;
+                        } else {
+                            self.registers[0xF] = 0;
+                        }
+
+                        self.registers[register_x] >>= 1;
+                    },
+                    0x7 => {
+                        let x = self.registers[register_x];
+                        let y = self.registers[register_y];
+                        println!("SUB V{:X}, V{:X}", register_x, register_y);
+
+                        if y > x {
+                            self.registers[0xF] = 1;
+                        } else {
+                            self.registers[0xF] = 0;
+                        }
+
+                        self.registers[register_x] = y - x;
+                    },
+                    0xE => {
+                        println!("SHL V{:X}", register_x);
+
+                        if ((self.registers[register_x] & 0x80) >> 7) == 1 {
+                            self.registers[0xF] = 1;
+                        } else {
+                            self.registers[0xF] = 0;
+                        }
+
+                        self.registers[register_x] <<= 1;
+                    }
+                    _ => ()
                 }
             },
-            0x8005..=0x8FF5 => {    // SUB Vx, Vy
+            0x9000..=0x9FF0 => {    // SNE Vx, Vy
                 let register_x = ((instruction & 0x0F00) >> 8) as usize;
                 let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                let x = self.registers[register_x];
-                let y = self.registers[register_y];
-
-                println!("SUB V{:X}, V{:X}", register_x, register_y);
-
-                if x > y {
-                    self.registers[0xF] = 1;
-                } else {
-                    self.registers[0xF] = 0;
+                println!("SNE V{:X}, V{:X}", register_x, register_y);
+                if self.registers[register_x] != self.registers[register_y] {
+                    self.pc += 2;
                 }
-
-                self.registers[register_x] = x - y;
-
-            },
-            0x8006..=0x8FF6 => {    // SHR Vx {, Vy}
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                println!("SHR V{:X}", register_x);
-
-                if (self.registers[register_x] & 0x1) == 1 {
-                    self.registers[0xF] = 1;
-                } else {
-                    self.registers[0xF] = 0;
-                }
-
-                self.registers[register_x] >>= 1;
-
-            },
-            0x8007..=0x8FF7 => {    // SUBN Vx, Vy
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                let x = self.registers[register_x];
-                let y = self.registers[register_y];
-                println!("SUB V{:X}, V{:X}", register_x, register_y);
-
-                if y > x {
-                    self.registers[0xF] = 1;
-                } else {
-                    self.registers[0xF] = 0;
-                }
-
-                self.registers[register_x] = y - x;
-            },
-            0x800E..=0x8FFE => {    // SHL Vx
-                let register_x = ((instruction & 0x0F00) >> 8) as usize;
-                println!("SHL V{:X}", register_x);
-
-                if ((self.registers[register_x] & 0x80) >> 8) == 1 {
-                    self.registers[0xF] = 1;
-                } else {
-                    self.registers[0xF] = 0;
-                }
-
-                self.registers[register_x] <<= 1;
             },
             0xA000..=0xAFFF => {    // LD I, addr
                 let addr = instruction & 0x0FFF;
                 // println!("Loading {:#X} into I", value);
                 println!("LD I, {:#X}", addr);
                 self.i = addr;
+            },
+            0xB000..=0xBFFF => {    // JP V0, addr
+                let addr = instruction & 0x0FFF;
+                println!("JP V0, {:#X}", addr);
+                self.pc = addr + self.registers[0x0] as u16;
+            },
+            0xC000..=0xCFFF => {    // RND Rx, byte
+                println!("NOT IMPLEMENTED YET")
             },
             0xD000..=0xDFFF => {    // DRW Vx, Vy, bytes
                 let register_x = ((instruction & 0x0F00) >> 8) as usize;
