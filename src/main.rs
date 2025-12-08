@@ -10,7 +10,10 @@ use minifb::{
 };
 
 const WIDTH: usize = 512;
+const WIDTH_MULT: usize = WIDTH / 64;
 const HEIGHT: usize = 256;
+const HEIGHT_MULT: usize = HEIGHT / 32;
+const CLEAR_VAL: u32 = 0x004D4D4D;
 
 enum EmulatorError {
     DisplayCreationError
@@ -18,7 +21,7 @@ enum EmulatorError {
 
 struct Display {
     window: Window,
-    framebuffer: [u32; WIDTH * HEIGHT]
+    framebuffer: Box<[u32; WIDTH * HEIGHT]>
 }
 
 impl Display {
@@ -28,7 +31,7 @@ impl Display {
         Ok(
             Display {
                 window: window,
-                framebuffer: [0x004D4D4D; WIDTH * HEIGHT]
+                framebuffer: Box::new([0x004D4D4D; WIDTH * HEIGHT])
             }
         )
     }
@@ -81,7 +84,7 @@ impl Chip8CPU {
         }
 
         for (i, byte) in font.into_iter().enumerate() {
-            self.ram[0x50 + i] = *byte;
+            self.ram[0x10 + i] = *byte;
         }
 
         Ok(())
@@ -100,7 +103,7 @@ impl Chip8CPU {
         match instruction {
             0x00E0 => {
                 println!("Clearing Screen...");
-                *screen = [0x004D4D4D; WIDTH * HEIGHT];
+                *screen = [CLEAR_VAL; WIDTH * HEIGHT];
             },
             0x1000..=0x1FFF => {    // JP addr
                 let addr = instruction & 0x0FFF;
@@ -140,9 +143,29 @@ impl Chip8CPU {
                 let register_y = ((instruction & 0x00F0) >> 4) as usize;
                 let x = self.registers[register_x] as usize;
                 let y = self.registers[register_y] as usize;
-                let bytes = (instruction & 0x000F) as u8;
-                println!("Displaying {:#X}-byte sprite from memory location I at {:#X}, {:#X}", bytes, x, y);
-                screen[x + (WIDTH * y)] = 0x00FF0000;   // NEED TO TAKE INTO ACCOUNT ASPECT RATIO
+                let rows = (instruction & 0x000F) as usize;
+                println!("Displaying {:#X}-row sprite from memory location {:#X} at {:#X}, {:#X}", rows, self.i, x, y);
+
+                // Draw pixels (each byte is a row starting at x, y). Each bit in the byte is a pixel (i.e. 0x00111100 would be __####__)
+                for row in 0..rows {
+                    // Get row data (byte)
+                    let row_byte = self.ram[self.i as usize + (row as usize)];
+
+                    // Each bit in row is a pixel starting at x, y and moving to the right (xor bit with pixel)
+                    for column in 0..8 {
+                        // if screen[((x + column) * WIDTH_MULT) + (WIDTH + (y * HEIGHT_MULT))] == CLEAR_VAL {
+                        //     println!("VALUE IS CLEAR");
+                        // }
+                        if ((row_byte >> (7 - column)) & 0x1) == 1 {
+                            // Place pixel at x + column, y + row
+                            for i in 0..WIDTH_MULT {
+                                for j in 0..HEIGHT_MULT {
+                                    screen[(((x + column) * WIDTH_MULT) + i) + ((((y + row) * HEIGHT_MULT) + j) * WIDTH)] = 0x00FF0000;
+                                }
+                            }
+                        }
+                    }
+                }
             },
             _ => ()                 // NOP
         }
@@ -203,7 +226,7 @@ impl Chip8Emulator {
     pub fn run(&mut self) {
         while self.display.window.is_open() {
             self.cpu.tick(&mut self.display.framebuffer);
-            self.display.window.update_with_buffer(&self.display.framebuffer, WIDTH, HEIGHT).unwrap();
+            self.display.window.update_with_buffer(&*self.display.framebuffer, WIDTH, HEIGHT).unwrap();
         }
     }
 }
