@@ -9,13 +9,16 @@ use minifb::{
     WindowOptions
 };
 
+const WIDTH: usize = 512;
+const HEIGHT: usize = 256;
+
 enum EmulatorError {
     DisplayCreationError
 }
 
 struct Display {
     window: Window,
-    // framebuffer: [u32, WIDTH * HEIGHT]
+    framebuffer: [u32; WIDTH * HEIGHT]
 }
 
 impl Display {
@@ -24,7 +27,8 @@ impl Display {
         
         Ok(
             Display {
-                window: window
+                window: window,
+                framebuffer: [0x004D4D4D; WIDTH * HEIGHT]
             }
         )
     }
@@ -83,7 +87,7 @@ impl Chip8CPU {
         Ok(())
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, screen: &mut [u32; WIDTH * HEIGHT]) {
         // Fetch instruction
         let mut instruction: u16 = 0x0;
         instruction = (self.ram[self.pc as usize] as u16) << 8;
@@ -96,10 +100,11 @@ impl Chip8CPU {
         match instruction {
             0x00E0 => {
                 println!("Clearing Screen...");
+                *screen = [0x004D4D4D; WIDTH * HEIGHT];
             },
             0x1000..=0x1FFF => {    // JP addr
                 let addr = instruction & 0x0FFF;
-                println!("Jumping to {:#X}", addr);
+                // println!("Jumping to {:#X}", addr);
                 self.pc = addr;
             },
             0x6000..=0x6FFF => {    // LD Vx, byte
@@ -133,10 +138,11 @@ impl Chip8CPU {
             0xD000..=0xDFFF => {    // DRW Vx, Vy, bytes
                 let register_x = ((instruction & 0x0F00) >> 8) as usize;
                 let register_y = ((instruction & 0x00F0) >> 4) as usize;
-                let x = self.registers[register_x];
-                let y = self.registers[register_y];
+                let x = self.registers[register_x] as usize;
+                let y = self.registers[register_y] as usize;
                 let bytes = (instruction & 0x000F) as u8;
                 println!("Displaying {:#X}-byte sprite from memory location I at {:#X}, {:#X}", bytes, x, y);
+                screen[x + (WIDTH * y)] = 0x00FF0000;   // NEED TO TAKE INTO ACCOUNT ASPECT RATIO
             },
             _ => ()                 // NOP
         }
@@ -150,9 +156,9 @@ struct Chip8Emulator {
 }
 
 impl Chip8Emulator {
-    pub fn new(width: usize, height: usize) -> Result<Self, EmulatorError> {
+    pub fn new() -> Result<Self, EmulatorError> {
 
-        let display = Display::new("CHIP-8 Emulator", width, height)
+        let display = Display::new("CHIP-8 Emulator", WIDTH, HEIGHT)
                                         .map_err(|_e| EmulatorError::DisplayCreationError)?;
 
         let mut cpu = Chip8CPU::new();
@@ -195,8 +201,9 @@ impl Chip8Emulator {
     }
 
     pub fn run(&mut self) {
-        for _ in 0..=20 {
-            self.cpu.tick();
+        while self.display.window.is_open() {
+            self.cpu.tick(&mut self.display.framebuffer);
+            self.display.window.update_with_buffer(&self.display.framebuffer, WIDTH, HEIGHT).unwrap();
         }
     }
 }
@@ -217,7 +224,7 @@ fn main() {
         Ok(file) => file
     };
 
-    let mut emulator = match Chip8Emulator::new(512, 256) {
+    let mut emulator = match Chip8Emulator::new() {
         Ok(emulator) => emulator,
         Err(_) => {
             return eprintln!("Failed to load emulator")
