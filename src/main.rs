@@ -99,14 +99,51 @@ impl Chip8CPU {
 
         // Decode and run instruction
         match instruction {
-            0x00E0 => {
+            0x00E0 => {             // CLS
                 // println!("Clearing Screen...");
+                println!("CLS");
                 *screen = [CLEAR_VAL; WIDTH * HEIGHT];
+            },
+            0x00EE => {             // RET
+                println!("RET");
+                self.pc = self.stack[self.sp as usize];
+                self.sp -= 1;
             },
             0x1000..=0x1FFF => {    // JP addr
                 let addr = instruction & 0x0FFF;
+                // println!("JP {:#X}", addr);
                 // println!("Jumping to {:#X}", addr);
                 self.pc = addr;
+            },
+            0x2000..=0x2FFF => {    // CALL addr
+                println!("CALL {:#X}", (instruction & 0x0FFF));
+                self.sp += 1;
+                self.stack[self.sp as usize] = self.pc;
+                self.pc = instruction & 0x0FFF;
+            },
+            0x3000..=0x3FFF => {    // SE Vx, byte
+                let register = ((instruction & 0x0F00) >> 8) as usize;
+                let val = (instruction & 0x00FF) as u8;
+                println!("SE V{:X}, {:#X}", register, val);
+                if self.registers[register] == val {
+                    self.pc += 2;
+                }
+            },
+            0x4000..=0x4FFF => {    // SNE Vx, byte
+                let register = ((instruction & 0x0F00) >> 8) as usize;
+                let val = (instruction & 0x00FF) as u8;
+                println!("SNE V{:X}, {:#X}", register, val);
+                if self.registers[register] != val {
+                    self.pc += 2;
+                }
+            },
+            0x5000..=0x5FF0 => {    // SE Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                println!("SE V{:X} V{:X}", register_x, register_y);
+                if self.registers[register_x] == self.registers[register_y] {
+                    self.pc += 2;
+                }
             },
             0x6000..=0x6FFF => {    // LD Vx, byte
                 // Get register from 0x0F00
@@ -115,26 +152,121 @@ impl Chip8CPU {
                 // Get value from 0x00FF
                 let val = (instruction & 0x00FF) as u8;
                 // println!("Loading {:#X} into register {:#X}", val, register);
+                println!("LD V{:X}, {:#X}", register, val);
 
                 // Place val into register
                 self.registers[register as usize] = val;
             },
             0x7000..=0x7FFF => {    // ADD Vx, byte
                 // Get register from 0x0F00
-                let register = (instruction & 0x0F00) >> 8;
+                let register = ((instruction & 0x0F00) >> 8) as usize;
 
                 // Get value from 0x00FF
                 let value = (instruction & 0x00FF) as u8;
-
-                // println!("Adding {:#X} to register {:#X}", value, register);
+                println!("ADD V{:X}, {:#X}", register, value);
 
                 // Set register = register + value
-                self.registers[register as usize] = self.registers[register as usize] + value;
+                self.registers[register] = self.registers[register].wrapping_add(value);
+            },
+            0x8000..=0x8FF0 => {    // LD Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                println!("LD V{:X}, V{:X}", register_x, register_y);
+                self.registers[register_x] = self.registers[register_y];
+            },
+            0x8001..=0x8FF1 => {    // OR Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                println!("OR V{:X}, V{:X}", register_x ,register_y);
+                self.registers[register_x] = self.registers[register_x] | self.registers[register_y];
+            },
+            0x8002..=0x8FF2 => {    // AND Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                println!("AND V{:X}, V{:X}", register_x, register_y);
+                self.registers[register_x] = self.registers[register_x] & self.registers[register_y];
+            },
+            0x8003..=0x8FF3 => {    // XOR Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                println!("XOR V{:X}, V{:X}", register_x, register_y);
+                self.registers[register_x] = self.registers[register_x] ^ self.registers[register_y];
+            },
+            0x8004..=0x8FF4 => {    // ADD Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                println!("ADD V{:X}, V{:X}", register_x, register_y);
+
+                let (val, overflow) = self.registers[register_x].overflowing_add(self.registers[register_y]);
+                self.registers[register_x] = val;
+                if overflow {
+                    self.registers[0xF] = 1;
+                } else {
+                    self.registers[0xF] = 0;
+                }
+            },
+            0x8005..=0x8FF5 => {    // SUB Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                let x = self.registers[register_x];
+                let y = self.registers[register_y];
+
+                println!("SUB V{:X}, V{:X}", register_x, register_y);
+
+                if x > y {
+                    self.registers[0xF] = 1;
+                } else {
+                    self.registers[0xF] = 0;
+                }
+
+                self.registers[register_x] = x - y;
+
+            },
+            0x8006..=0x8FF6 => {    // SHR Vx {, Vy}
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                println!("SHR V{:X}", register_x);
+
+                if (self.registers[register_x] & 0x1) == 1 {
+                    self.registers[0xF] = 1;
+                } else {
+                    self.registers[0xF] = 0;
+                }
+
+                self.registers[register_x] >>= 1;
+
+            },
+            0x8007..=0x8FF7 => {    // SUBN Vx, Vy
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                let register_y = ((instruction & 0x00F0) >> 4) as usize;
+                let x = self.registers[register_x];
+                let y = self.registers[register_y];
+                println!("SUB V{:X}, V{:X}", register_x, register_y);
+
+                if y > x {
+                    self.registers[0xF] = 1;
+                } else {
+                    self.registers[0xF] = 0;
+                }
+
+                self.registers[register_x] = y - x;
+            },
+            0x800E..=0x8FFE => {    // SHL Vx
+                let register_x = ((instruction & 0x0F00) >> 8) as usize;
+                println!("SHL V{:X}", register_x);
+
+                if ((self.registers[register_x] & 0x80) >> 8) == 1 {
+                    self.registers[0xF] = 1;
+                } else {
+                    self.registers[0xF] = 0;
+                }
+
+                self.registers[register_x] <<= 1;
             },
             0xA000..=0xAFFF => {    // LD I, addr
-                let value = instruction & 0x0FFF;
+                let addr = instruction & 0x0FFF;
                 // println!("Loading {:#X} into I", value);
-                self.i = value;
+                println!("LD I, {:#X}", addr);
+                self.i = addr;
             },
             0xD000..=0xDFFF => {    // DRW Vx, Vy, bytes
                 let register_x = ((instruction & 0x0F00) >> 8) as usize;
@@ -142,7 +274,8 @@ impl Chip8CPU {
                 let x = self.registers[register_x] as usize;
                 let y = self.registers[register_y] as usize;
                 let rows = (instruction & 0x000F) as usize;
-                // println!("Displaying {:#X}-row sprite from memory location {:#X} at {:#X}, {:#X}", rows, self.i, x, y);
+
+                println!("DRW V{:X}, V{:X}, {:#X}", register_x, register_y, rows);
 
                 // Draw pixels (each byte is a row starting at x, y). Each bit in the byte is a pixel (i.e. 0x00111100 would be __####__)
                 for row in 0..rows {
@@ -169,7 +302,7 @@ impl Chip8CPU {
                 }
             },
             _ => {
-                println!("Unimplemented Instruction");
+                println!("Unimplemented Instruction: {:#X}", instruction);
             }
         }
     }
