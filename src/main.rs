@@ -9,9 +9,9 @@ use minifb::{
     WindowOptions
 };
 
-const WIDTH: usize = 512;
+const WIDTH: usize = 1024;
 const WIDTH_MULT: usize = WIDTH / 64;
-const HEIGHT: usize = 256;
+const HEIGHT: usize = 512;
 const HEIGHT_MULT: usize = HEIGHT / 32;
 const CLEAR_VAL: u32 = 0x004D4D4D;
 
@@ -46,8 +46,7 @@ struct Chip8CPU {
     i: u16,
     sp: i16,
     dt: u8,
-    st: u8,
-    running: bool
+    st: u8
 }
 
 impl Chip8CPU {
@@ -60,8 +59,7 @@ impl Chip8CPU {
             i: 0x0,
             sp: -1,
             dt: 0,
-            st: 0,
-            running: false
+            st: 0
         }
     }
 
@@ -102,7 +100,7 @@ impl Chip8CPU {
         // Decode and run instruction
         match instruction {
             0x00E0 => {
-                println!("Clearing Screen...");
+                // println!("Clearing Screen...");
                 *screen = [CLEAR_VAL; WIDTH * HEIGHT];
             },
             0x1000..=0x1FFF => {    // JP addr
@@ -116,7 +114,7 @@ impl Chip8CPU {
 
                 // Get value from 0x00FF
                 let val = (instruction & 0x00FF) as u8;
-                println!("Loading {:#X} into register {:#X}", val, register);
+                // println!("Loading {:#X} into register {:#X}", val, register);
 
                 // Place val into register
                 self.registers[register as usize] = val;
@@ -128,14 +126,14 @@ impl Chip8CPU {
                 // Get value from 0x00FF
                 let value = (instruction & 0x00FF) as u8;
 
-                println!("Adding {:#X} to register {:#X}", value, register);
+                // println!("Adding {:#X} to register {:#X}", value, register);
 
                 // Set register = register + value
                 self.registers[register as usize] = self.registers[register as usize] + value;
             },
             0xA000..=0xAFFF => {    // LD I, addr
                 let value = instruction & 0x0FFF;
-                println!("Loading {:#X} into I", value);
+                // println!("Loading {:#X} into I", value);
                 self.i = value;
             },
             0xD000..=0xDFFF => {    // DRW Vx, Vy, bytes
@@ -144,7 +142,7 @@ impl Chip8CPU {
                 let x = self.registers[register_x] as usize;
                 let y = self.registers[register_y] as usize;
                 let rows = (instruction & 0x000F) as usize;
-                println!("Displaying {:#X}-row sprite from memory location {:#X} at {:#X}, {:#X}", rows, self.i, x, y);
+                // println!("Displaying {:#X}-row sprite from memory location {:#X} at {:#X}, {:#X}", rows, self.i, x, y);
 
                 // Draw pixels (each byte is a row starting at x, y). Each bit in the byte is a pixel (i.e. 0x00111100 would be __####__)
                 for row in 0..rows {
@@ -153,6 +151,9 @@ impl Chip8CPU {
 
                     // Each bit in row is a pixel starting at x, y and moving to the right (xor bit with pixel)
                     for column in 0..8 {
+
+                        // TODO: NEED TO XOR THE PIXEL WE ARE CURRENTLY LOOKING AT
+
                         // if screen[((x + column) * WIDTH_MULT) + (WIDTH + (y * HEIGHT_MULT))] == CLEAR_VAL {
                         //     println!("VALUE IS CLEAR");
                         // }
@@ -167,7 +168,9 @@ impl Chip8CPU {
                     }
                 }
             },
-            _ => ()                 // NOP
+            _ => {
+                println!("Unimplemented Instruction");
+            }
         }
     }
 }
