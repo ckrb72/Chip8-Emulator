@@ -1,8 +1,5 @@
 use std::{
-    fs,
-    env,
-    thread,
-    time::{
+    cell::{self, RefCell}, env, fs, rc::Rc, thread, time::{
         Duration,
         Instant
     }
@@ -39,6 +36,34 @@ impl Display {
                 framebuffer: Box::new([0x004D4D4D; WIDTH * HEIGHT])
             }
         )
+    }
+
+    pub fn draw_pixel(&mut self, x: usize, y: usize, color: u32) {
+        for i in 0..WIDTH_MULT {
+            for j in 0..HEIGHT_MULT {
+                self.framebuffer[((x * WIDTH_MULT) + i) + (((y * HEIGHT_MULT) + j) * WIDTH)] = color;
+            }
+        }
+    }
+
+    pub fn get_pixel_color(&self, x: usize, y: usize) -> u32 {
+        self.framebuffer[(x * WIDTH_MULT) + (WIDTH * (y * HEIGHT_MULT))]
+    }
+
+    pub fn is_pixel_clear(&self, x: usize, y: usize) -> bool {
+        self.framebuffer[(x * WIDTH_MULT) + (WIDTH * (y * HEIGHT_MULT))] == CLEAR_VAL
+    }
+
+    pub fn clear(&mut self) {
+        *self.framebuffer = [CLEAR_VAL; WIDTH * HEIGHT];
+    }
+
+    pub fn clear_pixel(&mut self, x: usize, y: usize) {
+        for i in 0..WIDTH_MULT {
+            for j in 0..HEIGHT_MULT {
+                self.framebuffer[((x * WIDTH_MULT) + i) + (((y * HEIGHT_MULT) + j) * WIDTH)] = CLEAR_VAL;
+            }
+        }
     }
 }
 
@@ -87,13 +112,13 @@ impl Chip8CPU {
         }
 
         for (i, byte) in font.into_iter().enumerate() {
-            self.ram[0x10 + i] = *byte;
+            self.ram[0x50 + i] = *byte;
         }
 
         Ok(())
     }
 
-    pub fn tick(&mut self, screen: &mut [u32; WIDTH * HEIGHT]) {
+    pub fn tick(&mut self, display: &mut Display, keyboard: &mut Rc<RefCell<[bool; 16]>>) {
         // Fetch instruction
         let mut instruction = (self.ram[self.pc as usize] as u16) << 8;
         instruction = instruction | (self.ram[(self.pc + 1) as usize] as u16);
@@ -115,7 +140,7 @@ impl Chip8CPU {
         match instruction {
             0x00E0 => {             // CLS
                 println!("CLS");
-                *screen = [CLEAR_VAL; WIDTH * HEIGHT];
+                display.clear();
             },
             0x00EE => {             // RET
                 println!("RET");
@@ -292,6 +317,8 @@ impl Chip8CPU {
 
                 println!("DRW V{:X}, V{:X}, {:#X}", register_x, register_y, rows);
 
+                self.registers[0xF] = 0;
+
                 // Draw pixels (each byte is a row starting at x, y). Each bit in the byte is a pixel (i.e. 0x00111100 would be __####__)
                 for row in 0..rows {
                     // Get row data (byte)
@@ -300,22 +327,41 @@ impl Chip8CPU {
                     // Each bit in row is a pixel starting at x, y and moving to the right (xor bit with pixel)
                     for column in 0..8 {
 
-                        // TODO: NEED TO XOR THE PIXEL WE ARE CURRENTLY LOOKING AT
-
-                        // if screen[((x + column) * WIDTH_MULT) + (WIDTH + (y * HEIGHT_MULT))] == CLEAR_VAL {
-                        //     println!("VALUE IS CLEAR");
-                        // }
+                        // If the current pixel we are looking at in the row is 1 XOR it onto the screen
                         if ((row_byte >> (7 - column)) & 0x1) == 1 {
-                            // Place pixel at x + column, y + row
-                            for i in 0..WIDTH_MULT {
-                                for j in 0..HEIGHT_MULT {
-                                    screen[(((x + column) * WIDTH_MULT) + i) + ((((y + row) * HEIGHT_MULT) + j) * WIDTH)] = 0x00FF0000;
-                                }
+
+                            // If color is clear draw pixel, else turn pixel off and set VF to 1
+                            if display.is_pixel_clear(x + column, y + row) {
+                                display.draw_pixel(x + column, y + row, 0x00FF0000);
+                            } else {
+                                display.clear_pixel(x + column, y + row);
+                                self.registers[0xF] = 1;
                             }
                         }
                     }
                 }
             },
+            0xE000..=0xEFFF => {
+                let byte = (instruction & 0xFF) as u8;
+                let register = ((instruction & 0x0F00) >> 8) as usize;
+                let key = self.registers[register] as usize;
+
+                match byte {
+                    0x9E => {   // SKP Vx
+                        println!("SKP V{:X}", register);
+                        if keyboard.borrow()[key] == true {
+                            self.pc += 2;
+                        }
+                    },
+                    0xA1 => {   // SKNP Vx
+                        println!("SKNP V{:X}", register);
+                        if keyboard.borrow()[key] == false {
+                            self.pc += 2;
+                        }
+                    }
+                    _ => ()
+                }
+            }
             0xF000..=0xFFFF => {
                 let byte = (instruction & 0xFF) as u8;
                 let register = ((instruction & 0x0F00) >> 8) as usize;
@@ -325,6 +371,23 @@ impl Chip8CPU {
                         println!("LD V{:X}, DT", register);
                         self.registers[register] = self.dt;
                     },
+                    0x0A => {   // LD Vx, K
+                        println!("LD V{:X}, K", register);
+                        // Check if a key is pressed
+                        let mut pressed = false;
+                        for (key, state) in keyboard.borrow().iter().enumerate() {
+                            if *state {
+                                pressed = true;
+                                self.registers[register] = key as u8;
+                            }
+                        }
+
+                        // If no keys are pressed, decrement pc
+                        if !pressed {
+                            // Decrement pc, essentially causing the program to loop
+                            self.pc -= 2;
+                        }
+                    }
                     0x15 => {   // LD DT, Vx
                         println!("LD DT, V{:X}", register);
                         self.dt = self.registers[register];
@@ -337,6 +400,11 @@ impl Chip8CPU {
                         println!("ADD I, V{:X}", register);
                         self.i += self.registers[register] as u16;
                     },
+                    0x29 => {   // LD F, Vx
+                        println!("LD F, V{:X}", register);
+                        let key = self.registers[register];
+                        self.i = 0x0050 + ((key * 5) as u16);
+                    }
                     0x33 => {   // LD B, Vx
                         let val = self.registers[register];
                         let ones = val % 10;
@@ -376,17 +444,62 @@ impl Chip8CPU {
     }
 }
 
+struct Chip8KeyboardCallback {
+    keys: Rc<RefCell<[bool; 16]>>
+}
+
+impl Chip8KeyboardCallback {
+    pub fn new(keys: Rc<RefCell<[bool; 16]>>) -> Self {
+        Chip8KeyboardCallback { 
+            keys: keys
+        }
+    }
+}
+
+
+impl minifb::InputCallback for Chip8KeyboardCallback {
+    fn add_char(&mut self, uni_char: u32) {
+
+    }
+
+    fn set_key_state(&mut self, _key: minifb::Key, _state: bool) {
+        match _key {
+            minifb::Key::Key1 => { self.keys.borrow_mut()[0x1] = _state; },
+            minifb::Key::Key2 => { self.keys.borrow_mut()[0x2] = _state; },
+            minifb::Key::Key3 => { self.keys.borrow_mut()[0x3] = _state; },
+            minifb::Key::Key4 => { self.keys.borrow_mut()[0xC] = _state; },
+            minifb::Key::Q => { self.keys.borrow_mut()[0x4] = _state; },
+            minifb::Key::W => { self.keys.borrow_mut()[0x5] = _state; },
+            minifb::Key::E => { self.keys.borrow_mut()[0x6] = _state; },
+            minifb::Key::R => { self.keys.borrow_mut()[0xD] = _state; },
+            minifb::Key::A => { self.keys.borrow_mut()[0x7] = _state; },
+            minifb::Key::S => { self.keys.borrow_mut()[0x8] = _state; },
+            minifb::Key::D => { self.keys.borrow_mut()[0x9] = _state; },
+            minifb::Key::F => { self.keys.borrow_mut()[0xE] = _state; },
+            minifb::Key::Z => { self.keys.borrow_mut()[0xA] = _state; },
+            minifb::Key::X => { self.keys.borrow_mut()[0x0] = _state; },
+            minifb::Key::C => { self.keys.borrow_mut()[0xB] = _state; },
+            minifb::Key::V => { self.keys.borrow_mut()[0xF] = _state; },
+            _ => ()
+        }
+    }
+}
+
 struct Chip8Emulator {
     cpu: Chip8CPU,
     display: Display,
+    keyboard: Rc<RefCell<[bool; 16]>>,
     clock_speed: f32    // speed in hz
 }
 
 impl Chip8Emulator {
     pub fn new() -> Result<Self, EmulatorError> {
 
-        let display = Display::new("CHIP-8 Emulator", WIDTH, HEIGHT)
+        let mut display = Display::new("CHIP-8 Emulator", WIDTH, HEIGHT)
                                         .map_err(|_e| EmulatorError::DisplayCreationError)?;
+
+        let keyboard = Rc::new(RefCell::new([false; 16]));
+        display.window.set_input_callback(Box::new(Chip8KeyboardCallback::new(keyboard.clone())));
 
         let mut cpu = Chip8CPU::new();
 
@@ -412,8 +525,9 @@ impl Chip8Emulator {
 
         Ok(
             Chip8Emulator { 
-                cpu, 
+                cpu: cpu, 
                 display: display,
+                keyboard: keyboard,
                 clock_speed: 60.0 
             }
         )
@@ -434,7 +548,7 @@ impl Chip8Emulator {
             let sleep_time = next_time - Instant::now();
             thread::sleep(sleep_time);
             next_time += interval;
-            self.cpu.tick(&mut self.display.framebuffer);
+            self.cpu.tick(&mut self.display, &mut self.keyboard);
             self.display.window.update_with_buffer(&*self.display.framebuffer, WIDTH, HEIGHT).unwrap();
         }
     }
