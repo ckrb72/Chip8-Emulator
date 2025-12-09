@@ -8,3 +8,9 @@ To run the emulator, just do cargo run test-path (i.e. cargo run ./1-chip8-logo.
 The descriptions of the instructions that I used to implement them can be found [here](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#3.1).
 
 The github where I got the tests from is [here](https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file#ibm-logo).
+
+## Screenshots
+![splash](./res/splash.png)
+![ibm](./res/ibm.png)
+![instruction-test](./res/instruction-test.png)
+![carry-test](./res/carry-test.png)
