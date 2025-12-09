@@ -1,6 +1,11 @@
 use std::{
     fs,
-    env
+    env,
+    thread,
+    time::{
+        Duration,
+        Instant
+    }
 };
 
 use minifb::{
@@ -90,14 +95,21 @@ impl Chip8CPU {
 
     pub fn tick(&mut self, screen: &mut [u32; WIDTH * HEIGHT]) {
         // Fetch instruction
-        let mut instruction: u16 = 0x0;
-        instruction = (self.ram[self.pc as usize] as u16) << 8;
+        let mut instruction = (self.ram[self.pc as usize] as u16) << 8;
         instruction = instruction | (self.ram[(self.pc + 1) as usize] as u16);
 
         // println!("INSTRUCTION: {:#X}", instruction);
             
         // Move to next instruction
         self.pc += 2;
+
+        if self.dt > 0 {
+            self.dt -= 1;
+        }
+
+        if self.st > 0 {
+            self.st -= 1;
+        }
 
         // Decode and run instruction
         match instruction {
@@ -204,49 +216,50 @@ impl Chip8CPU {
                         let x = self.registers[register_x];
                         let y = self.registers[register_y];
                         println!("SUB V{:X}, V{:X}", register_x, register_y);
-
-                        if x > y {
-                            self.registers[0xF] = 1;
-                        } else {
+                        let (val, overflow) = x.overflowing_sub(y);
+                        self.registers[register_x] = val;
+                        if overflow {
                             self.registers[0xF] = 0;
+                        } else {
+                            self.registers[0xF] = 1;
                         }
-
-                        self.registers[register_x] = x.wrapping_sub(y);
                     },
                     0x6 => {    // SHR Vx
                         println!("SHR V{:X}", register_x);
 
-                        if (self.registers[register_x] & 0x1) == 1 {
+                        let low_bits = self.registers[register_x] & 0x1;
+                        self.registers[register_x] >>= 1;
+
+                        if low_bits == 1 {
                             self.registers[0xF] = 1;
                         } else {
                             self.registers[0xF] = 0;
                         }
-
-                        self.registers[register_x] >>= 1;
                     },
                     0x7 => {    // SUB Vx, Vy
                         let x = self.registers[register_x];
                         let y = self.registers[register_y];
                         println!("SUB V{:X}, V{:X}", register_x, register_y);
+                        let (val, overflow) = y.overflowing_sub(x);
+                        self.registers[register_x] = val;
 
-                        if y > x {
-                            self.registers[0xF] = 1;
-                        } else {
+                        if overflow {
                             self.registers[0xF] = 0;
+                        } else {
+                            self.registers[0xF] = 1;
                         }
-
-                        self.registers[register_x] = y.wrapping_sub(x);
                     },
                     0xE => {    // SHL Vx
                         println!("SHL V{:X}", register_x);
 
-                        if ((self.registers[register_x] & 0x80) >> 7) == 1 {
+                        let high_bits = (self.registers[register_x] & 0x80) >> 7;
+                        self.registers[register_x] <<= 1;
+
+                        if high_bits == 1 {
                             self.registers[0xF] = 1;
                         } else {
                             self.registers[0xF] = 0;
                         }
-
-                        self.registers[register_x] <<= 1;
                     }
                     _ => ()
                 }
@@ -337,13 +350,15 @@ impl Chip8CPU {
                         self.ram[self.i as usize + 1] = tens;
                         self.ram[self.i as usize + 2] = ones;
                     },
-                    0x55 => {
+                    0x55 => {   // LD [I], Vx
                         // Load all registers from 0..=register into memory starting at i
+                        println!("LD [I], V{:X}", register);
                         for index in 0..=register {
                             self.ram[self.i as usize + index] = self.registers[index];
                         }
                     },
-                    0x65 => {
+                    0x65 => {   // LD Vx, [I]
+                        println!("LD V{:X}, [I]", register);
                         for index in 0..=register {
                             self.registers[index] = self.ram[self.i as usize + index];
                         }
@@ -413,7 +428,12 @@ impl Chip8Emulator {
     }
 
     pub fn run(&mut self) {
+        let interval = Duration::from_secs_f32(1.0 / self.clock_speed);
+        let mut next_time = Instant::now() + interval;
         while self.display.window.is_open() {
+            let sleep_time = next_time - Instant::now();
+            thread::sleep(sleep_time);
+            next_time += interval;
             self.cpu.tick(&mut self.display.framebuffer);
             self.display.window.update_with_buffer(&*self.display.framebuffer, WIDTH, HEIGHT).unwrap();
         }
@@ -444,6 +464,7 @@ fn main() {
     };
 
     emulator.load_rom(&rom);
+    emulator.set_clock(256.0);
     emulator.run();
 
 }
